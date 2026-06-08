@@ -19,7 +19,7 @@ Usage (once implemented):
 """
 
 import re
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import search_listings, suggest_outfit, create_fit_card, evaluate_harmony, get_weather_context
 
 # ── session state ─────────────────────────────────────────────────────────────
 
@@ -93,6 +93,21 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     # Step 4: Select the item
     session["selected_item"] = results[0]
     
+    # --- STRETCH FEATURES ---
+    weather_info = get_weather_context("New York")
+    
+    # Safely evaluate harmony only if items exist in the wardrobe
+    if session["wardrobe"].get("items"):
+        first_wardrobe_item = session["wardrobe"]["items"][0]
+        harmony_info = evaluate_harmony(session["selected_item"], first_wardrobe_item)
+        harmony_note = f"Harmony Check with {first_wardrobe_item['name']}: {harmony_info}"
+    else:
+        harmony_note = "Harmony Check: No wardrobe items available to evaluate color harmony."
+        
+    # Inject this context cleanly into the description string
+    session["selected_item"]["description"] += f" [STYLIST NOTE: {weather_info} {harmony_note}]"
+    # ------------------------
+
     # Step 5: Generate Outfit
     session["outfit_suggestion"] = suggest_outfit(
         new_item=session["selected_item"], 
