@@ -66,7 +66,36 @@ If the outfit suggestion is somehow missing or corrupted, it falls back to gener
 
 ### Additional Tools (if any)
 
-<!-- Copy the block above for any tools beyond the required three -->
+### Tool 4: evaluate_harmony (Stretch Goal)
+
+**What it does:**
+Evaluates color theory and style tags between the newly found item and a specific wardrobe piece to ensure they don't clash before finalizing an outfit.
+
+**Input parameters:**
+- `new_item` (dict): The dictionary containing the newly found item's details.
+- `wardrobe_item` (dict): A specific item dictionary selected from the user's wardrobe.
+
+**What it returns:**
+A 1-2 sentence string stating "Yes" or "No" with a brief fashion rationale (e.g., "Yes, the neon green contrasts perfectly with the dark navy").
+
+**What happens if it fails or returns nothing:**
+If the LLM fails to return a clear judgment, it defaults to a safe fallback: "These items have contrasting styles but could work well as a statement outfit."
+
+---
+
+### Tool 5: get_weather_context (Stretch Goal)
+
+**What it does:**
+Fetches live weather data for a given city to inform the practicality of the outfit suggestion (e.g., suggesting layers if it's cold).
+
+**Input parameters:**
+- `location` (str): The name of the city/location to check.
+
+**What it returns:**
+A string containing the current temperature and conditions (e.g., "Current weather in London: 55°F and rainy.").
+
+**What happens if it fails or returns nothing:**
+If the user doesn't provide a location, or if the `wttr.in` API times out or fails, it catches the exception and returns: "Weather service currently unavailable. Please manually specify if you need an outfit for hot, cold, or rainy weather." This prevents the agent from hanging.
 
 ---
 
@@ -112,15 +141,16 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 | Tool | Failure mode | Agent response |
 |------|-------------|----------------|
-| search_listings | No results match the query | |
-| suggest_outfit | Wardrobe is empty | |
-| create_fit_card | Outfit input is missing or incomplete | |
-
+| search_listings | No results match the query | "I couldn't find exactly what you're looking for in your size or price range. Try dropping some specific keywords!" |
+| suggest_outfit | Wardrobe is empty | "Since your digital closet is empty right now, I'd style this with a reliable pair of baggy jeans and a simple ribbed tank." |
+| create_fit_card | Outfit input is missing or incomplete | "just grabbed this [item title] for $[price] — honestly an absolute steal 🖤" |
+| evaluate_harmony | LLM parsing failure | "These items have contrasting styles but could work well as a statement outfit." |
+| get_weather_context | API timeout or invalid location | "Weather service currently unavailable. Please manually specify if you need an outfit for hot or cold weather." |
 ---
 
 ## Architecture
 
-```flowchart TD
+flowchart TD
     User([User Query]) --> Init[Initialize Session State]
     Init --> Extract[Extract Search Params]
     Extract --> Search1[search_listings]
@@ -130,8 +160,11 @@ For each tool, describe the specific failure mode you're handling and what the a
     
     Search1 -- results found --> StoreItem
     Fallback -- results found --> StoreItem
+    StoreItem[State: selected_item = results[0]]
     
-    StoreItem[State: selected_item = results[0]] --> Suggest[suggest_outfit]
+    StoreItem --> Weather[get_weather_context]
+    Weather --> Eval[evaluate_harmony]
+    Eval --> Suggest[suggest_outfit]
     
     Suggest -- wardrobe empty --> GenericStyle[Generate Generic Outfit]
     Suggest -- success --> StoreOutfit
@@ -141,7 +174,6 @@ For each tool, describe the specific failure mode you're handling and what the a
     
     FitCard --> StoreCard[State: final_fit_card = result]
     StoreCard --> Output([Return Final Response to User])
-```
 ---
 
 ## AI Tool Plan
