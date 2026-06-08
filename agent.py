@@ -18,32 +18,46 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
+import re
 from tools import search_listings, suggest_outfit, create_fit_card
-
 
 # ── session state ─────────────────────────────────────────────────────────────
 
 def _new_session(query: str, wardrobe: dict) -> dict:
-    """
-    Initialize and return a fresh session dict for one user interaction.
-
-    The session dict is the single source of truth for everything that happens
-    during a run — it stores the original query, parsed parameters, tool results,
-    and any error that caused early termination.
-
-    You may add fields to this dict as needed for your implementation.
-    """
+    """Initialize and return a fresh session dict for one user interaction."""
     return {
-        "query": query,              # original user query
-        "parsed": {},                # extracted description / size / max_price
-        "search_results": [],        # list of matching listing dicts
-        "selected_item": None,       # top result, passed into suggest_outfit
-        "wardrobe": wardrobe,        # user's wardrobe dict
-        "outfit_suggestion": None,   # string returned by suggest_outfit
-        "fit_card": None,            # string returned by create_fit_card
-        "error": None,               # set if the interaction ended early
+        "query": query,              
+        "parsed": {},                
+        "search_results": [],        
+        "selected_item": None,       
+        "wardrobe": wardrobe,        
+        "outfit_suggestion": None,   
+        "fit_card": None,            
+        "error": None,               
     }
 
+def _parse_query(query: str) -> dict:
+    """
+    Simple regex-based parser to extract size and price constraints.
+    Keeps the agent fast and reduces unnecessary LLM calls.
+    """
+    parsed = {
+        "description": query,
+        "size": None,
+        "max_price": None
+    }
+    
+    # Extract price (e.g., "under $30", "under 30")
+    price_match = re.search(r'under\s*\$?\s*(\d+(?:\.\d{2})?)', query.lower())
+    if price_match:
+        parsed["max_price"] = float(price_match.group(1))
+        
+    # Extract size (e.g., "size M", "size W30")
+    size_match = re.search(r'size\s+([a-zA-Z0-9/]+)', query.lower())
+    if size_match:
+        parsed["size"] = size_match.group(1).upper()
+        
+    return parsed
 
 # ── planning loop ─────────────────────────────────────────────────────────────
 
@@ -51,52 +65,48 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     Main agent entry point. Runs the FitFindr planning loop for a single
     user interaction and returns the completed session dict.
-
-    Args:
-        query:    Natural language user request
-                  (e.g., "vintage graphic tee under $30, size M")
-        wardrobe: User's wardrobe dict — use get_example_wardrobe() or
-                  get_empty_wardrobe() from utils/data_loader.py
-
-    Returns:
-        The session dict after the interaction completes. Check session["error"]
-        first — if it is not None, the interaction ended early and the other
-        output fields (outfit_suggestion, fit_card) will be None.
-
-    TODO — implement this function using the planning loop you designed in planning.md:
-
-        Step 1: Initialize the session with _new_session().
-
-        Step 2: Parse the user's query to extract a description, size, and
-                max_price. You can use regex, string splitting, or ask the LLM
-                to parse it — document your choice in planning.md.
-                Store the result in session["parsed"].
-
-        Step 3: Call search_listings() with the parsed parameters.
-                Store results in session["search_results"].
-                If no results: set session["error"] to a helpful message and
-                return the session early. Do NOT proceed to suggest_outfit
-                with empty input.
-
-        Step 4: Select the item to use (e.g., the top result).
-                Store it in session["selected_item"].
-
-        Step 5: Call suggest_outfit() with the selected item and wardrobe.
-                Store the result in session["outfit_suggestion"].
-
-        Step 6: Call create_fit_card() with the outfit suggestion and selected item.
-                Store the result in session["fit_card"].
-
-        Step 7: Return the session.
-
-    Before writing code, complete the Planning Loop and State Management sections
-    of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # Step 1: Initialize
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+    
+    # Step 2: Parse parameters
+    session["parsed"] = _parse_query(query)
+    desc = session["parsed"]["description"]
+    size = session["parsed"]["size"]
+    price = session["parsed"]["max_price"]
+    
+    # Step 3: Search with constraints
+    results = search_listings(description=desc, size=size, max_price=price)
+    
+    # SMART FALLBACK LOGIC
+    # If no results and the user specified a size, try again without the size limit.
+    if len(results) == 0 and size is not None:
+        results = search_listings(description=desc, size=None, max_price=price)
+        
+    session["search_results"] = results
+    
+    # HARD FAIL LOGIC
+    if len(results) == 0:
+        session["error"] = "I couldn't find exactly what you're looking for in your size or price range. Try dropping some specific keywords!"
+        return session
+        
+    # Step 4: Select the item
+    session["selected_item"] = results[0]
+    
+    # Step 5: Generate Outfit
+    session["outfit_suggestion"] = suggest_outfit(
+        new_item=session["selected_item"], 
+        wardrobe=session["wardrobe"]
+    )
+    
+    # Step 6: Generate Fit Card
+    session["fit_card"] = create_fit_card(
+        outfit=session["outfit_suggestion"], 
+        new_item=session["selected_item"]
+    )
+    
+    # Step 7: Return final state
     return session
-
 
 # ── CLI test ──────────────────────────────────────────────────────────────────
 
